@@ -1,0 +1,28 @@
+name: Auto unfollow non-followers
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # every day at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (true = only print, false = really unfollow)"
+        default: "true"
+
+jobs:
+  unfollow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Run unfollow script
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          # Scheduled runs are LIVE only when you set the repo variable LIVE=true.
+          # Manual runs use the dry_run input.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || (vars.LIVE == 'true' && 'false' || 'true') }}
+          MAX_UNFOLLOWS: "30"
+        run: python unfollow.py
