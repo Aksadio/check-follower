@@ -1,14 +1,19 @@
 """
-Unfollow everyone on GitHub who does not follow you back.
+GitHub follow-back + unfollow bot.
+
+1. Follows back everyone who follows you (but you don't follow yet).
+2. Unfollows everyone you follow who does not follow you back.
 
 Environment variables:
-  GH_TOKEN   Personal access token (classic) with the "user:follow" scope
-  DRY_RUN    "true" (default) only prints who would be unfollowed
-             set to "false" to really unfollow
-  MAX_UNFOLLOWS  max unfollows per run (default 30)
+  GH_TOKEN        Personal access token (classic) with the "user:follow" scope
+  DRY_RUN         "true" (default) only prints what would happen
+                  set to "false" to really follow / unfollow
+  MAX_UNFOLLOWS   max unfollows per run (default 30)
+  MAX_FOLLOWS     max follow-backs per run (default 30)
 
-Optional file: whitelist.txt (one username per line) - these accounts are
-never unfollowed, even if they don't follow you back.
+Optional files (one username per line, lines starting with # are ignored):
+  whitelist.txt        never unfollowed, even if they don't follow you back
+  no_followback.txt    never followed back, even if they follow you
 """
 import os
 import random
@@ -21,6 +26,7 @@ API = "https://api.github.com"
 TOKEN = os.environ.get("GH_TOKEN")
 DRY_RUN = os.environ.get("DRY_RUN", "true").lower() != "false"
 MAX_UNFOLLOWS = int(os.environ.get("MAX_UNFOLLOWS", "30"))
+MAX_FOLLOWS = int(os.environ.get("MAX_FOLLOWS", "30"))
 
 if not TOKEN:
     sys.exit("GH_TOKEN is missing. Add it as an environment variable / repo secret.")
@@ -51,34 +57,58 @@ def get_all(path):
     return names
 
 
-def load_whitelist():
-    if not os.path.exists("whitelist.txt"):
+def load_list(filename):
+    if not os.path.exists(filename):
         return set()
-    with open("whitelist.txt", encoding="utf-8") as f:
+    with open(filename, encoding="utf-8") as f:
         return {
             line.strip().lower()
             for line in f
-            if line.strip() and not line.startswith("#")
+            if line.strip() and not line.strip().startswith("#")
         }
+
+
+def pause():
+    time.sleep(random.uniform(3, 8))  # be gentle with GitHub
 
 
 def main():
     followers = get_all("/user/followers")
     following = get_all("/user/following")
-    whitelist = load_whitelist()
-    print("Whitelist loaded:", sorted(whitelist))
+    whitelist = load_list("whitelist.txt")
+    no_followback = load_list("no_followback.txt")
 
-    not_following_back = sorted(following - followers - whitelist)
+    to_follow = sorted(followers - following - no_followback)
+    to_unfollow = sorted(following - followers - whitelist)
 
     print(f"Followers: {len(followers)} | Following: {len(following)}")
-    print(f"Not following you back: {len(not_following_back)}")
+    print("Whitelist loaded:", sorted(whitelist))
+    print("No-followback list loaded:", sorted(no_followback))
+    print(f"Follow back needed: {len(to_follow)}")
+    print(f"Not following you back: {len(to_unfollow)}")
     print("Mode:", "DRY RUN (nothing will change)" if DRY_RUN else "LIVE")
 
     # Safety check: if followers came back empty, something is wrong. Stop.
     if not followers and following:
         sys.exit("Followers list is empty - aborting to be safe.")
 
-    for user in not_following_back[:MAX_UNFOLLOWS]:
+    # Step 1: follow back new followers
+    for user in to_follow[:MAX_FOLLOWS]:
+        if DRY_RUN:
+            print(f"[dry-run] would follow back {user}")
+            continue
+        r = requests.put(f"{API}/user/following/{user}", headers=HEADERS, timeout=30)
+        if r.status_code == 204:
+            print(f"Followed back {user}")
+        else:
+            print(f"Failed to follow {user}: {r.status_code} {r.text}")
+            if r.status_code in (403, 429):
+                print("Rate limited - stopping follow-backs this run.")
+                break
+        pause()
+
+    # Step 2: unfollow people who don't follow back
+    for user in to_unfollow[:MAX_UNFOLLOWS]:
         if DRY_RUN:
             print(f"[dry-run] would unfollow {user}")
             continue
@@ -88,9 +118,9 @@ def main():
         else:
             print(f"Failed to unfollow {user}: {r.status_code} {r.text}")
             if r.status_code in (403, 429):
-                print("Rate limited - stopping this run.")
+                print("Rate limited - stopping unfollows this run.")
                 break
-        time.sleep(random.uniform(3, 8))  # be gentle with GitHub
+        pause()
 
 
 if __name__ == "__main__":
