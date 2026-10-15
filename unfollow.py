@@ -66,7 +66,7 @@ def main():
     followers = get_all("/user/followers")
     following = get_all("/user/following")
     whitelist = load_whitelist()
-     print("Whitelist loaded:", sorted(whitelist))
+    print("Whitelist loaded:", sorted(whitelist))
 
     not_following_back = sorted(following - followers - whitelist)
 
