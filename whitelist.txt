@@ -1,3 +1,5 @@
 # One GitHub username per line. These accounts are NEVER unfollowed.
 # Example:
 # torvalds
+   claude
+   cs50
